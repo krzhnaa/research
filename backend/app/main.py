@@ -10,8 +10,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://research-two-rose.vercel.app",
-        "http://localhost:4173",
+        "http://localhost:5173",
     ],
+    allow_origin_regex=r"https://research-.*-krishnas-projects-c3f1e550\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
