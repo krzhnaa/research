@@ -92,6 +92,16 @@ export default function ReportCard({ result }: { result: ResearchResult }) {
     { label: "Address", value: company.address, icon: MapPin },
   ].filter((fact) => fact.value);
 
+  const categoryColors: Record<string, string> = {
+    home: "border-sky-200 bg-sky-50 text-sky-700",
+    about: "border-violet-200 bg-violet-50 text-violet-700",
+    products: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    services: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    pricing: "border-amber-200 bg-amber-50 text-amber-700",
+    contact: "border-rose-200 bg-rose-50 text-rose-700",
+    other: "border-slate-200 bg-slate-100 text-slate-600",
+  };
+
   return (
     <div className="panel-raised float-in max-w-5xl p-6 md:p-8">
       <div className="mb-6 flex items-start justify-between gap-4">
@@ -159,6 +169,67 @@ export default function ReportCard({ result }: { result: ResearchResult }) {
           ))}
         </ul>
       </div>
+
+      {result.crawl_metadata && result.crawled_pages && result.crawled_pages.length > 0 && (
+        <div className="mb-6 rounded-[24px] border border-slate-200 bg-white/85 p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h4 className="text-sm font-semibold text-slate-900">Pages Analyzed</h4>
+            <div className="flex items-center gap-2">
+              {result.crawl_metadata.used_sitemap && (
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-medium text-slate-500">
+                  sitemap used
+                </span>
+              )}
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-600">
+                {result.crawl_metadata.pages_crawled} page{result.crawl_metadata.pages_crawled === 1 ? "" : "s"}
+              </span>
+            </div>
+          </div>
+
+          {result.crawl_metadata.javascript_site_detected && (
+            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+              This site appears to render content with JavaScript, which can limit how much text the crawler can see.
+            </p>
+          )}
+
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {result.crawled_pages.map((page, index) => (
+              <a
+                key={index}
+                href={page.url}
+                target="_blank"
+                rel="noreferrer"
+                className="lift-card rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 transition hover:border-sky-200"
+              >
+                <span
+                  className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                    categoryColors[page.category] || categoryColors.other
+                  }`}
+                >
+                  {page.category}
+                </span>
+                <p className="mt-1 truncate text-xs font-medium text-slate-800">{page.title || "Untitled"}</p>
+                <p className="truncate font-mono text-[11px] text-slate-500">{page.url}</p>
+              </a>
+            ))}
+          </div>
+
+          {result.crawl_metadata.crawl_notes.length > 0 && (
+            <details className="mt-3 text-xs text-slate-500">
+              <summary className="cursor-pointer font-medium text-slate-600">
+                Crawl notes ({result.crawl_metadata.crawl_notes.length})
+              </summary>
+              <ul className="mt-2 space-y-1 pl-4">
+                {result.crawl_metadata.crawl_notes.map((note, index) => (
+                  <li key={index} className="list-disc">
+                    {note}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </div>
+      )}
 
       {competitors.length > 0 && (
         <div className="mb-6 rounded-[24px] border border-slate-200 bg-white/85 p-5">

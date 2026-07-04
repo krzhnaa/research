@@ -9,7 +9,11 @@ router = APIRouter()
 
 @router.post("/pdf")
 async def generate_report_pdf(result: ResearchResult):
-    pdf_bytes = generate_pdf(result.company.model_dump(), [c.model_dump() for c in result.competitors])
+    pdf_bytes = generate_pdf(
+        result.company.model_dump(),
+        [c.model_dump() for c in result.competitors],
+        [p.model_dump() for p in result.crawled_pages],
+    )
     filename = f"{result.company.company_name.replace(' ', '_')}_report.pdf"
     return Response(
         content=pdf_bytes,

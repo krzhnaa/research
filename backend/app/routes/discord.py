@@ -20,6 +20,7 @@ async def send_to_discord(payload: DiscordSendPayload):
     pdf_bytes = generate_pdf(
         payload.result.company.model_dump(),
         [c.model_dump() for c in payload.result.competitors],
+        [p.model_dump() for p in payload.result.crawled_pages],
     )
     try:
         await send_report_to_discord(

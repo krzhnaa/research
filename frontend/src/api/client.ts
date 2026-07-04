@@ -17,6 +17,9 @@ export interface CompanyInfo {
   pain_points: string[];
   summary: string;
   industry: string | null;
+  confidence?: Record<string, string>;
+  sources?: Record<string, string>;
+  page_sources?: Record<string, string>;
 }
 
 export interface Competitor {
@@ -28,12 +31,31 @@ export interface CrawledPage {
   url: string;
   title: string;
   content: string;
+  category: string;
+}
+
+export interface CrawlMetadata {
+  pages_found: number;
+  pages_crawled: number;
+  used_sitemap: boolean;
+  structured_data_found: boolean;
+  javascript_site_detected: boolean;
+  crawl_notes: string[];
+}
+
+export interface ResearchTiming {
+  crawl_seconds: number;
+  total_seconds: number;
 }
 
 export interface ResearchResult {
   company: CompanyInfo;
   competitors: Competitor[];
   crawled_pages: CrawledPage[];
+  crawl_metadata: CrawlMetadata;
+  sources: Record<string, string>;
+  timing: ResearchTiming;
+  model_used: string | null;
 }
 
 export async function researchCompany(input: string, model: string): Promise<ResearchResult> {
