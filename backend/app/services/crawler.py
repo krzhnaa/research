@@ -1,4 +1,5 @@
 import asyncio
+import difflib
 import re
 import time
 from urllib import robotparser
@@ -51,6 +52,16 @@ IGNORE_KEYWORDS = [
 TRACKING_QUERY_PREFIXES = ("utm_", "fbclid", "gclid", "mc_", "ref")
 PHONE_REGEX = re.compile(r"(?:(?:\+?\d{1,3}[\s().-]*)?(?:\d[\s().-]*){7,}\d)")
 EMAIL_REGEX = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
+# Matches a language/locale path segment like /de, /fr, /pt-br, /zh-cn, /es-es —
+# whether it's the root of the URL or nested (e.g. /es-es/about, /es-es/product/wikis).
+# Restricted to a known set of locale codes so genuine content paths that happen to be
+# two letters (rare, but possible) are never mistakenly blocked.
+KNOWN_LOCALE_CODES = {
+    "en", "es", "fr", "de", "it", "pt", "ja", "ko", "zh", "ru", "ar", "hi", "nl",
+    "sv", "da", "no", "fi", "pl", "tr", "th", "vi", "he", "id", "cs", "el", "hu",
+    "ro", "sk", "uk", "bg", "hr", "lt", "lv", "et", "sl", "ms", "fil", "ca",
+}
+LOCALE_PATH_SEGMENT_REGEX = re.compile(r"^([a-z]{2})(-[a-z]{2})?$", re.IGNORECASE)
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -60,6 +71,13 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9",
 }
+
+# Pages more similar than this ratio to an already-seen page are treated as duplicates.
+DUPLICATE_SIMILARITY_THRESHOLD = 0.94
+# Pages with less unique text than this are too thin to reliably judge as duplicate/unique,
+# so the similarity check is skipped for them (prevents false positives on sparse pages
+# like pricing tables, which are mostly shared CTAs and headers).
+MIN_TEXT_LENGTH_FOR_DUPLICATE_CHECK = 400
 
 
 def normalize_url(url: str) -> str:
@@ -74,7 +92,13 @@ def is_ignored_url(url: str) -> bool:
     if any(bad in lower for bad in IGNORE_KEYWORDS):
         return True
     parsed = urlparse(lower)
-    if any(key.lower().startswith(TRACKING_QUERY_PREFIXES) for key, _ in []):
+    path_segments = [segment for segment in parsed.path.split("/") if segment]
+    if path_segments:
+        first_segment_match = LOCALE_PATH_SEGMENT_REGEX.match(path_segments[0])
+        if first_segment_match and first_segment_match.group(1) in KNOWN_LOCALE_CODES:
+            return True
+    query_keys = [pair.split("=")[0] for pair in parsed.query.split("&") if pair]
+    if any(key.startswith(TRACKING_QUERY_PREFIXES) for key in query_keys):
         return True
     return False
 
@@ -317,6 +341,22 @@ async def build_robot_parser(base_url: str, client: httpx.AsyncClient) -> robotp
         return None
 
 
+def _is_near_duplicate(candidate_text: str, seen_texts: list[str]) -> bool:
+    """
+    Real similarity check across full page text, instead of comparing only the
+    first ~1200 characters (which are almost always shared boilerplate like nav
+    remnants, hero taglines, and cookie banners across every page on a site).
+    Only flags genuinely duplicate pages (e.g. broken routes redirected to home).
+    """
+    if not candidate_text or len(candidate_text) < MIN_TEXT_LENGTH_FOR_DUPLICATE_CHECK:
+        return False
+    for existing in seen_texts:
+        ratio = difflib.SequenceMatcher(None, candidate_text, existing).quick_ratio()
+        if ratio > DUPLICATE_SIMILARITY_THRESHOLD:
+            return True
+    return False
+
+
 async def crawl_website(base_url: str, max_pages: int = 15, time_budget_seconds: int = 25) -> dict:
     """
     Crawl important pages with broad source coverage and bounded concurrency.
@@ -332,7 +372,7 @@ async def crawl_website(base_url: str, max_pages: int = 15, time_budget_seconds:
     structured_payloads: list[dict] = []
     extracted_contacts = {"phones": [], "emails": []}
     started_at = time.perf_counter()
-    seen_content_signatures: set[str] = set()
+    seen_page_texts: list[str] = []
     category_counts: dict[str, int] = {}
 
     async def fetch_page_candidate(
@@ -363,7 +403,8 @@ async def crawl_website(base_url: str, max_pages: int = 15, time_budget_seconds:
             category = detect_page_category(url, title, heading)
             payloads = extract_structured_data(html)
             contacts = extract_contacts(text)
-            signature = re.sub(r"\s+", " ", text[:1200]).strip().lower()
+            # Full normalized text used for similarity comparison (not just a short prefix).
+            signature = re.sub(r"\s+", " ", text).strip().lower()
             discovered_links = discover_links(html, url)
 
             return {
@@ -412,8 +453,8 @@ async def crawl_website(base_url: str, max_pages: int = 15, time_budget_seconds:
         extracted_contacts["phones"].extend(homepage_contacts["phones"])
         extracted_contacts["emails"].extend(homepage_contacts["emails"])
 
-        homepage_signature = re.sub(r"\s+", " ", homepage_text[:1200]).strip().lower()
-        seen_content_signatures.add(homepage_signature)
+        homepage_signature = re.sub(r"\s+", " ", homepage_text).strip().lower()
+        seen_page_texts.append(homepage_signature)
         visited.add(normalized_base)
         results.append(
             {
@@ -454,8 +495,17 @@ async def crawl_website(base_url: str, max_pages: int = 15, time_budget_seconds:
             reverse=True,
         )
 
+        # Guessed high-value paths (pricing/contact/about/products/services) are fetched
+        # as a priority tier FIRST, ahead of the broader sitemap/discovered-link batch.
+        # Otherwise, on large sites, the time budget can run out on low-value sitemap URLs
+        # before ever reaching the pages that matter most for the report.
+        guessed_normalized = {normalize_url(link) for link in guessed_links}
+        priority_tier = [url for url in ranked_urls if url in guessed_normalized and url not in visited]
+        remaining_tier = [url for url in ranked_urls if url not in guessed_normalized and url not in visited]
+
         semaphore = asyncio.Semaphore(4)
-        queued_urls = [url for url in ranked_urls if url not in visited][: max_pages * 3]
+        queued_urls = (priority_tier + remaining_tier)[: max_pages * 3]
+
         async def process_candidates(candidates: list[str]) -> list[str]:
             nested_candidates: list[str] = []
             fetch_tasks = [
@@ -479,14 +529,15 @@ async def crawl_website(base_url: str, max_pages: int = 15, time_budget_seconds:
                     visited.add(url)
 
                     signature = page.get("signature", "")
-                    if signature and signature in seen_content_signatures:
-                        crawl_notes.append(f"Skipped duplicate content at {url}.")
+                    if _is_near_duplicate(signature, seen_page_texts):
+                        crawl_notes.append(f"Skipped near-duplicate content at {url} (similarity check).")
                         continue
                     if signature:
-                        seen_content_signatures.add(signature)
+                        seen_page_texts.append(signature)
 
                     category = page.get("category", "other")
-                    if category != "other" and category_counts.get(category, 0) >= 2:
+                    category_cap = 1 if category == "other" else 2
+                    if category_counts.get(category, 0) >= category_cap:
                         continue
 
                     category_counts[category] = category_counts.get(category, 0) + 1

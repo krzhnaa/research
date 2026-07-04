@@ -109,7 +109,7 @@ async def research_company(req: ResearchRequest):
             raise HTTPException(status_code=404, detail=f"Could not resolve website for '{user_input}'")
 
     crawl_started_at = time.perf_counter()
-    crawl_result = await crawl_website(website, max_pages=15, time_budget_seconds=25)
+    crawl_result = await crawl_website(website, max_pages=15, time_budget_seconds=40)
     crawl_seconds = round(time.perf_counter() - crawl_started_at, 2)
 
     crawled_pages_raw = crawl_result.get("pages", [])
