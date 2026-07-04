@@ -192,25 +192,39 @@ export default function ReportCard({ result }: { result: ResearchResult }) {
             </p>
           )}
 
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="mt-3 space-y-3">
             {result.crawled_pages.map((page, index) => (
-              <a
-                key={index}
-                href={page.url}
-                target="_blank"
-                rel="noreferrer"
-                className="lift-card rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 transition hover:border-sky-200"
-              >
-                <span
-                  className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
-                    categoryColors[page.category] || categoryColors.other
-                  }`}
-                >
-                  {page.category}
-                </span>
-                <p className="mt-1 truncate text-xs font-medium text-slate-800">{page.title || "Untitled"}</p>
-                <p className="truncate font-mono text-[11px] text-slate-500">{page.url}</p>
-              </a>
+              <details key={index} className="group rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 open:bg-white">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <span
+                      className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                        categoryColors[page.category] || categoryColors.other
+                      }`}
+                    >
+                      {page.category}
+                    </span>
+                    <p className="mt-1 truncate text-sm font-medium text-slate-800">{page.title || "Untitled"}</p>
+                    <a
+                      href={page.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="truncate font-mono text-[11px] text-slate-500 hover:text-sky-600"
+                    >
+                      {page.url}
+                    </a>
+                  </div>
+                  <span className="flex-shrink-0 text-xs font-medium text-slate-400 group-open:text-sky-600">
+                    {page.content ? `${page.content.length.toLocaleString()} chars` : "no content"} &darr;
+                  </span>
+                </summary>
+                <div className="mt-3 max-h-96 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="whitespace-pre-wrap text-xs leading-6 text-slate-700">
+                    {page.content || "No readable text content was extracted from this page."}
+                  </p>
+                </div>
+              </details>
             ))}
           </div>
 

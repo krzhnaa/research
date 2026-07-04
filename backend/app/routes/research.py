@@ -273,7 +273,7 @@ async def research_company(req: ResearchRequest):
         CrawledPage(
             url=page["url"],
             title=page["title"],
-            content=page["content"][:500],
+            content=page["content"],
             category=page.get("category", "other"),
         )
         for page in crawled_pages_raw

@@ -18,6 +18,16 @@ LIGHT_BG = colors.HexColor("#f3f4f6")
 ZEBRA = colors.HexColor("#f9fafb")
 MUTED_TEXT = colors.HexColor("#6b7280")
 
+CATEGORY_LABELS = {
+    "home": "Home Page",
+    "about": "About Page",
+    "products": "Products Page",
+    "services": "Services Page",
+    "pricing": "Pricing Page",
+    "contact": "Contact Page",
+    "other": "Other Page",
+}
+
 
 def clean_text(text) -> str:
     """Replace unicode characters that break in default PDF fonts."""
@@ -46,6 +56,8 @@ def _styles():
         "subheading": ParagraphStyle("SubHeadingStyle", parent=base["Heading3"], fontSize=11,
                                       textColor=NAVY, spaceBefore=10, spaceAfter=4),
         "body": ParagraphStyle("BodyStyle", parent=base["BodyText"], fontSize=10, leading=15),
+        "pagecontent": ParagraphStyle("PageContentStyle", parent=base["BodyText"], fontSize=9.5,
+                                       leading=14.5, textColor=colors.HexColor("#1f2937")),
         "muted": ParagraphStyle("MutedStyle", parent=base["BodyText"], fontSize=8,
                                  textColor=MUTED_TEXT, fontName="Helvetica-Oblique"),
         "bullet": ParagraphStyle("BulletStyle", parent=base["BodyText"], fontSize=10,
@@ -138,10 +150,11 @@ def _bulleted_section(elements, styles, title, items, note=None):
         elements.append(Paragraph(f"&bull;&nbsp;&nbsp;{clean_text(item)}", styles["bullet"]))
 
 
-def _pages_analyzed_section(elements, styles, crawled_pages):
-    elements.append(Paragraph("Pages Analyzed", styles["heading"]))
+def _pages_analyzed_overview(elements, styles, crawled_pages, crawl_metadata):
+    elements.append(Paragraph("Pages Analyzed - Overview", styles["heading"]))
     elements.append(Paragraph(
-        "The following pages were discovered and analyzed to compile this report.",
+        f"{len(crawled_pages)} page(s) were crawled and analyzed to compile this report. "
+        f"Full extracted content for each page follows on the subsequent pages.",
         styles["muted"],
     ))
     elements.append(Spacer(1, 6))
@@ -150,21 +163,23 @@ def _pages_analyzed_section(elements, styles, crawled_pages):
         return
 
     rows = [[
+        Paragraph("<b>#</b>", styles["muted"]),
         Paragraph("<b>CATEGORY</b>", styles["muted"]),
         Paragraph("<b>TITLE</b>", styles["muted"]),
         Paragraph("<b>URL</b>", styles["muted"]),
     ]]
-    for page in crawled_pages:
+    for index, page in enumerate(crawled_pages, start=1):
         category = clean_text((page.get("category") or "other")).upper()
         title = clean_text(page.get("title") or "Untitled")
         url = clean_text(page.get("url") or "")
         rows.append([
+            Paragraph(str(index), styles["body"]),
             Paragraph(category, styles["body"]),
             Paragraph(title, styles["body"]),
             Paragraph(f"<font size=8>{url}</font>", styles["body"]),
         ])
 
-    table = Table(rows, colWidths=[2.8 * cm, 6.2 * cm, 8 * cm], repeatRows=1)
+    table = Table(rows, colWidths=[1 * cm, 2.5 * cm, 5.5 * cm, 8 * cm], repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), NAVY),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -174,6 +189,60 @@ def _pages_analyzed_section(elements, styles, crawled_pages):
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, ZEBRA]),
     ]))
     elements.append(table)
+
+    if crawl_metadata:
+        elements.append(Spacer(1, 10))
+        meta_bits = []
+        if crawl_metadata.get("used_sitemap"):
+            meta_bits.append("Sitemap was used to discover pages.")
+        if crawl_metadata.get("javascript_site_detected"):
+            meta_bits.append("This site appears to rely on JavaScript rendering, which can limit crawlable text.")
+        if meta_bits:
+            elements.append(Paragraph(" ".join(meta_bits), styles["muted"]))
+
+
+def _single_page_detail(elements, styles, page, index, total):
+    category = page.get("category") or "other"
+    category_label = CATEGORY_LABELS.get(category, category.title())
+    title = clean_text(page.get("title") or "Untitled")
+    url = clean_text(page.get("url") or "")
+    content = clean_text(page.get("content") or "").strip()
+
+    header_table = Table(
+        [[Paragraph(f"Page {index} of {total} &mdash; {category_label}", styles["subtitle"])],
+         [Paragraph(title, styles["title"])],
+         [Paragraph(f"<font size=8>{url}</font>", styles["subtitle"])]],
+        colWidths=[17 * cm],
+    )
+    header_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), NAVY),
+        ("LEFTPADDING", (0, 0), (-1, -1), 16),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 16),
+        ("TOPPADDING", (0, 0), (0, 0), 12),
+        ("BOTTOMPADDING", (0, -1), (-1, -1), 12),
+    ]))
+    elements.append(header_table)
+    elements.append(Spacer(1, 14))
+
+    elements.append(Paragraph("Extracted Page Content", styles["heading"]))
+    if not content:
+        elements.append(Paragraph("No readable text content was extracted from this page.", styles["body"]))
+        return
+
+    # Break long content into paragraph-sized chunks so ReportLab wraps it cleanly
+    # instead of rendering one enormous unreadable block.
+    chunk_size = 900
+    for start in range(0, len(content), chunk_size):
+        chunk = content[start:start + chunk_size]
+        elements.append(Paragraph(chunk, styles["pagecontent"]))
+        elements.append(Spacer(1, 6))
+
+
+def _pages_detail_section(elements, styles, crawled_pages):
+    total = len(crawled_pages)
+    for index, page in enumerate(crawled_pages, start=1):
+        elements.append(PageBreak())
+        _single_page_detail(elements, styles, page, index, total)
 
 
 def _competitors_section(elements, styles, competitors):
@@ -210,12 +279,19 @@ def _footer(canvas, doc):
     canvas.restoreState()
 
 
-def generate_pdf(company: dict, competitors: list, crawled_pages: list | None = None) -> bytes:
+def generate_pdf(
+    company: dict,
+    competitors: list,
+    crawled_pages: list | None = None,
+    crawl_metadata: dict | None = None,
+) -> bytes:
     """
     Generates a page-wise, topic-organized PDF report.
     company: dict matching CompanyInfo fields (may include sources/page_sources)
     competitors: list of {"name":..., "website":...}
-    crawled_pages: optional list of {"url","title","category"} to show crawl coverage
+    crawled_pages: list of {"url","title","category","content"} — each gets its own
+        dedicated page in the PDF with full extracted content, not just a summary row.
+    crawl_metadata: optional dict with used_sitemap / javascript_site_detected flags
     """
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -232,7 +308,6 @@ def generate_pdf(company: dict, competitors: list, crawled_pages: list | None = 
     elements.append(Spacer(1, 10))
     _company_info_table(elements, styles, company)
 
-    sources = company.get("sources", {}) or {}
     page_sources = company.get("page_sources", {}) or {}
 
     _bulleted_section(
@@ -251,7 +326,8 @@ def generate_pdf(company: dict, competitors: list, crawled_pages: list | None = 
 
     if crawled_pages:
         elements.append(PageBreak())
-        _pages_analyzed_section(elements, styles, crawled_pages)
+        _pages_analyzed_overview(elements, styles, crawled_pages, crawl_metadata)
+        _pages_detail_section(elements, styles, crawled_pages)
 
     elements.append(PageBreak())
     _competitors_section(elements, styles, competitors)

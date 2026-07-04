@@ -21,6 +21,7 @@ async def send_to_discord(payload: DiscordSendPayload):
         payload.result.company.model_dump(),
         [c.model_dump() for c in payload.result.competitors],
         [p.model_dump() for p in payload.result.crawled_pages],
+        payload.result.crawl_metadata.model_dump() if payload.result.crawl_metadata else None,
     )
     try:
         await send_report_to_discord(
